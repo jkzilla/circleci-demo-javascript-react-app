@@ -1,6 +1,6 @@
 orbs:
   node: circleci/node@4.2.1
-  gcp-cli: circleci/gcp-cli@2.2.0 
+  gcp-cli: circleci/gcp-cli@2.2.0  
 
 version: 2.1
 
