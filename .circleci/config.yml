@@ -8,9 +8,8 @@ jobs:
     steps:
       - run:
           command: |
-            # apt-get update
-            # apt-get install dnsutils -y
-            sudo yum install bind-utils
+            sudo apt-get -y update && apt-get install dnsutils -y
+            # sudo yum install bind-utils
 workflows:
   build-workflow:
     jobs:
