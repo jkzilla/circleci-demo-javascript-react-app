@@ -4,13 +4,13 @@ jobs:
     circleci_ip_ranges: true # opts the job into the IP ranges feature
     docker:
       - image: cimg/node:18.4.0
-    parallelism: 40
+    # parallelism: 40
     steps:
       - run:
           command: |
-            apt-get update
-            apt-get install dnsutils -y
-            yum install bind-utils
+            # apt-get update
+            # apt-get install dnsutils -y
+            sudo yum install bind-utils
 workflows:
   build-workflow:
     jobs:
