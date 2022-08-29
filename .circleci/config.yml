@@ -1,16 +1,19 @@
 version: 2.1
+
+orbs:
+  node: circleci/node@5.0.2
+
 jobs:
-  build:
-    circleci_ip_ranges: true # opts the job into the IP ranges feature
-    docker:
-      - image: cimg/node:18.4.0
-    # parallelism: 40
+  run-commit-backend-tests:
+    executor:
+      name: node/default 
+    resource_class: small
     steps:
+      - checkout
       - run:
-          command: |
-            sudo apt-get -y update && sudo apt-get install dnsutils -y
-            # sudo yum install bind-utils
+          command: echo "I'm a webhook"
+      
 workflows:
-  build-workflow:
+  test-commit-backend:
     jobs:
-      - build
+      - run-commit-backend-tests
