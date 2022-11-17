@@ -29,7 +29,7 @@ jobs:
       # - empty:
       #     after-deps: 
       #       - checkout
-      - run: echo "This is before the conditional step2"
+      - run: echo "This is before the conditional step"
       # - when:
       #     condition: 
       #       equal: ["[(\"checkout\")]", "<< parameters.after-deps >>"]
