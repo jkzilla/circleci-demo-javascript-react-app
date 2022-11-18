@@ -1,66 +1,44 @@
 version: 2.1
 
-orbs:
-  win: circleci/windows@4.1.1
-
 jobs:
   build:
-    executor:
-      name: win/server-2022
-      size: medium
-    working_directory: ~/project
+    docker:
+      - image: cimg/base:current
+    resource_class: small 
     steps: 
-      - run:
-          name: Install JDK in the background
-          command: |          
-            curl -o jdk.zip -L https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.2%2B8/OpenJDK17U-jdk_x64_windows_hotspot_17.0.2_8.zip
-            mkdir /c/Program\ Files/Adoptium/
-            tar xfz jdk.zip -C /c/Program\ Files/Adoptium/
-            rm jdk.zip
-            touch /tmp/jdk.txt
-          shell: bash.exe
-          background: true
-
-      - run:
-          name: Install Maven in the background
-          command: |
-            choco install maven -y
-            touch /tmp/maven.txt
-            exit 1
-          shell: bash.exe
-
       - checkout
-  build2:
-    executor:
-      name: win/server-2022
-      size: medium
-    working_directory: ~/project
-    steps: 
       - run:
-          name: Install JDK in the background
-          command: |          
-            curl -o jdk.zip -L https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.2%2B8/OpenJDK17U-jdk_x64_windows_hotspot_17.0.2_8.zip
-            mkdir /c/Program\ Files/Adoptium/
-            tar xfz jdk.zip -C /c/Program\ Files/Adoptium/
-            rm jdk.zip
-            touch /tmp/jdk.txt
-          shell: bash.exe
-          background: true
-
-      - run:
-          name: Install Maven in the background
+          name: trigger project b's pipeline
           command: |
-            choco install maven -y
-            touch /tmp/maven.txt
-            sleep 10000
-          shell: bash.exe
+            curl -H "Circle-Token: $CIRCLE_TOKEN" "https://circleci.com/api/v2/project/jkzilla/cci-demo101b/pipeline" > workflow.json
+            PIPELINE_ID=$(jq -r '.pipeline_id' workflow.json)
+            echo "Set current pipeline ID to PIPELINE_ID env var"
+            echo "export PIPELINE_ID='${PIPELINE_ID}'" >> $BASH_ENV
+            rm workflow.json     
+      - run:
+          name: poll for project b's pipeline status
+          command: |
+            curl -H "Circle-Token: $CIRCLE_TOKEN" "https://circleci.com/api/v2/pipeline/$PIPELINE_ID/workflow" > workflow.json
+            PIPELINE_STATUS=$(jq -r '.status' workflow.json)
+            while [ "$STATUS" == "running" ]; do
+              echo still running
+              sleep 10
+              STATUS=$(curl -s "https://circleci.com/api/v2/pipeline/$PIPELINE/workflow?circle-token=$CIRCLE_TOKEN" | jq -r '.items[].status')
+            done
 
-      - checkout
-
+            echo "finally done, checking final status: $STATUS"
+            if [[ "$STATUS" == "success" ]]; then
+              echo "Proceeding with build, as triggered pipeline was success"
+              exit 0
+            else
+              echo "Stopping build, triggered pipeline was not a success"
+              exit 1
+            fi
 workflows:
   workflow:
     jobs:
-      - build
-      - build2
+      - build: 
+          context: CIRCLE_TOKEN
+      
 
 # VS Code Extension Version: 1.0.2
