@@ -19,22 +19,20 @@ jobs:
       - run:
           name: poll for project b's pipeline status
           command: |
-            curl -H "Circle-Token: $CIRCLE_TOKEN" "https://circleci.com/api/v2/pipeline/$PIPELINE_ID/workflow" > workflow.json
-            PIPELINE_STATUS=$(jq -r '.status' workflow.json)
-            while [ "$STATUS" == "running" ]; do
-              echo still running
-              sleep 10
-              STATUS=$(curl -s "https://circleci.com/api/v2/pipeline/$PIPELINE/workflow?circle-token=$CIRCLE_TOKEN" | jq -r '.items[].status')
-            done
-
-            echo "finally done, checking final status: $STATUS"
-            if [[ "$STATUS" == "success" ]]; then
-              echo "Proceeding with build, as triggered pipeline was success"
-              exit 0
-            else
-              echo "Stopping build, triggered pipeline was not a success"
-              exit 1
-            fi
+              STATUS=$(curl "https://circleci.com/api/v2/pipeline/$PIPELINE/workflow?circle-token=$CIRCLE_TOKEN" | jq -r '.items[].status')
+              while [ "$STATUS" == "running" ]; do
+                echo still running
+                sleep 10
+                STATUS=$(curl -s "https://circleci.com/api/v2/pipeline/$PIPELINE/workflow?circle-token=$CIRCLE_TOKEN" | jq -r '.items[].status')
+              done
+              echo "finally done, checking final status: $STATUS"
+              if [[ "$STATUS" == "success" ]]; then
+                echo "Proceeding with build, as triggered pipeline was success"
+                exit 0
+              else
+                echo "Stopping build, triggered pipeline was not a success"
+                exit 1
+              fi
 workflows:
   workflow:
     jobs:
