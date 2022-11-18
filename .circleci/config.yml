@@ -28,7 +28,6 @@ jobs:
             touch /tmp/maven.txt
             exit 1
           shell: bash.exe
-          background: true
 
       - checkout
       # - when:
