@@ -8,6 +8,9 @@ jobs:
     executor:
       name: win/server-2022
       size: medium
+      parallelism: 50
+    working_directory: ~/project
+    
     steps: 
       - run:
           name: Install JDK in the background
