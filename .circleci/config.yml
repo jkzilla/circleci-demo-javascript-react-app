@@ -1,44 +1,66 @@
 version: 2.1
 
-# specify this dummy command
-
-# commands:
-#   empty:
-#     parameters:
-#       after-deps:
-#         type: steps
-#         default: []
-#       should-run:
-#         type: string
-#         default: "yes"
-#     steps: 
-#       - when: 
-#           condition: << parameters.should-run >>, "yes"
-#           steps: 
-#             - run: 
-#                 command: |
-#                   circleci-agent step halt
-#       - steps: << parameters.after-deps >>
+orbs:
+  win: circleci/windows@4.1.1
 
 jobs:
   build:
-    docker:
-      - image: cimg/base:edge
-      
+    executor:
+      name: win/server-2022
+      size: medium
+    working_directory: ~/project
     steps: 
-      # - empty:
-      #     after-deps: 
-      #       - checkout
-      - run: echo "This is before the conditional step"
-      # - when:
-      #     condition: 
-      #       equal: ["[(\"checkout\")]", "<< parameters.after-deps >>"]
-      #     steps:
-      #       - run: echo "No steps provided"
+      - run:
+          name: Install JDK in the background
+          command: |          
+            curl -o jdk.zip -L https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.2%2B8/OpenJDK17U-jdk_x64_windows_hotspot_17.0.2_8.zip
+            mkdir /c/Program\ Files/Adoptium/
+            tar xfz jdk.zip -C /c/Program\ Files/Adoptium/
+            rm jdk.zip
+            touch /tmp/jdk.txt
+          shell: bash.exe
+          background: true
+
+      - run:
+          name: Install Maven in the background
+          command: |
+            choco install maven -y
+            touch /tmp/maven.txt
+            exit 1
+          shell: bash.exe
+
+      - checkout
+  build2:
+    executor:
+      name: win/server-2022
+      size: medium
+    working_directory: ~/project
+    steps: 
+      - run:
+          name: Install JDK in the background
+          command: |          
+            curl -o jdk.zip -L https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.2%2B8/OpenJDK17U-jdk_x64_windows_hotspot_17.0.2_8.zip
+            mkdir /c/Program\ Files/Adoptium/
+            tar xfz jdk.zip -C /c/Program\ Files/Adoptium/
+            rm jdk.zip
+            touch /tmp/jdk.txt
+          shell: bash.exe
+          background: true
+
+      - run:
+          name: Install Maven in the background
+          command: |
+            choco install maven -y
+            touch /tmp/maven.txt
+            sleep 10000
+          shell: bash.exe
+
+      - checkout
 
 workflows:
   workflow:
     jobs:
       - build
+      - build2
 
-# VS Code Extension Version: 1.0.0
+# VS Code Extension Version: 1.0.2
