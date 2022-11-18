@@ -23,7 +23,7 @@ jobs:
               while [ "$STATUS" == "running" ]; do
                 echo still running
                 sleep 10
-                STATUS=$(curl -s "https://circleci.com/api/v2/pipeline/$PIPELINE/workflow?circle-token=$CIRCLE_TOKEN" | jq -r '.items[].status')
+                STATUS=$(curl -s "https://circleci.com/api/v2/pipeline/$PIPELINE_ID/workflow?circle-token=$CIRCLE_TOKEN" | jq -r '.items[].status')
               done
               echo "finally done, checking final status: $STATUS"
               if [[ "$STATUS" == "success" ]]; then
