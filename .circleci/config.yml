@@ -9,7 +9,6 @@ jobs:
       name: win/server-2022
       size: medium
     working_directory: ~/project
-    parallelism: 50
     steps: 
       - run:
           name: Install JDK in the background
@@ -27,6 +26,7 @@ jobs:
           command: |
             choco install maven -y
             touch /tmp/maven.txt
+            exit 1
           shell: bash.exe
           background: true
 
