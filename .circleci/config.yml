@@ -10,15 +10,15 @@ jobs:
       - run:
           name: trigger project b's pipeline
           command: |
-            PIPELINE_ID=$(curl --location --request POST 'https://circleci.com/api/v2/project/github/jkzilla/cci-demo101b/pipeline' \
+            echo "export PIPELINE_ID=$(curl --location --request POST 'https://circleci.com/api/v2/project/github/jkzilla/cci-demo101b/pipeline' \
               --header 'Content-Type: application/json' \
               --header "Circle-Token: ${CIRCLE_TOKEN}" \
-               | jq -r '.id')
+            | jq -r '.id')" >> $BASH_ENV
             echo $PIPELINE_ID
-            echo "export PIPELINE_ID='${PIPELINE_ID}'" >> $BASH_ENV
       - run:
           name: poll for project b's pipeline status
           command: |
+              echo $PIPELINE_ID
               STATUS=$(curl "https://circleci.com/api/v2/pipeline/$PIPELINE_ID/workflow?circle-token=$CIRCLE_TOKEN" | jq -r '.items[].status')
               while [ "$STATUS" == "running" ]; do
                 echo still running
