@@ -13,11 +13,7 @@ jobs:
             PIPELINE_ID=$(curl --location --request POST 'https://circleci.com/api/v2/project/github/jkzilla/cci-demo101b/pipeline' \
               --header 'Content-Type: application/json' \
               --header "Circle-Token: ${CIRCLE_TOKEN}" \
-              --data-raw '{
-                "parameters": {
-                 "node-v-1": "10.1.1"
-                }
-              }' | jq -r '.id')
+               | jq -r '.id')
             echo $PIPELINE_ID
             echo "export PIPELINE_ID='${PIPELINE_ID}'" >> $BASH_ENV
       - run:
