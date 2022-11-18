@@ -15,6 +15,13 @@ jobs:
               --header "Circle-Token: ${CIRCLE_TOKEN}" \
             | jq -r '.id')" >> $BASH_ENV
             echo $PIPELINE_ID
+            curl --location --request POST 'https://circleci.com/api/v2/project/github/jkzilla/cci-demo101b/' \
+              --header 'Content-Type: application/json' \
+              --header "Circle-Token: ${CIRCLE_TOKEN}" \
+              --data-raw '{
+                "name": "PIPELINE_ID",
+                "value": "$PIPELINE_ID"
+              }'
       - run:
           name: poll for project b's pipeline status
           command: |
@@ -23,7 +30,7 @@ jobs:
               while [ "$STATUS" == "running" ]; do
                 echo still running
                 sleep 10
-                STATUS=$(curl -s "https://circleci.com/api/v2/pipeline/$PIPELINE_ID/workflow?circle-token=$CIRCLE_TOKEN" | jq -r '.items[].status')
+                STATUS=$(curl "https://circleci.com/api/v2/pipeline/$PIPELINE_ID/workflow?circle-token=$CIRCLE_TOKEN" | jq -r '.items[].status')
               done
               echo "finally done, checking final status: $STATUS"
               if [[ "$STATUS" == "success" ]]; then
