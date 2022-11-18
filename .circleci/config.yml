@@ -19,7 +19,7 @@ jobs:
       - run:
           name: poll for project b's pipeline status
           command: |
-              STATUS=$(curl "https://circleci.com/api/v2/pipeline/$PIPELINE/workflow?circle-token=$CIRCLE_TOKEN" | jq -r '.items[].status')
+              STATUS=$(curl "https://circleci.com/api/v2/pipeline/$PIPELINE_ID/workflow?circle-token=$CIRCLE_TOKEN" | jq -r '.items[].status')
               while [ "$STATUS" == "running" ]; do
                 echo still running
                 sleep 10
