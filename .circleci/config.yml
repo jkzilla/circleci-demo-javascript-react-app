@@ -15,13 +15,14 @@ jobs:
               --header "Circle-Token: ${CIRCLE_TOKEN}" \
             | jq -r '.id')
             echo $PIPELINE_ID
-            curl --location --request POST 'https://circleci.com/api/v2/project/gh/jkzilla/circleci-demo-javascript-react-app/envvar' \
-              --header 'Content-Type: application/json' \
-              --header "Circle-Token: ${CIRCLE_TOKEN}" \
-              --data-raw '{
-                "name": "PIPELINE_ID",
-                "value": "$PIPELINE_ID"
-              }'
+            echo 'export PIPELINE_ID="$PIPELINE_ID"' >> $BASH_ENV
+            # curl --location --request POST 'https://circleci.com/api/v2/project/gh/jkzilla/circleci-demo-javascript-react-app/envvar' \
+            #   --header 'Content-Type: application/json' \
+            #   --header "Circle-Token: ${CIRCLE_TOKEN}" \
+            #   --data-raw '{
+            #     "name": "PIPELINE_ID",
+            #     "value": "$PIPELINE_ID"
+            #   }'
       - run:
           name: poll for project b's pipeline status
           command: |
@@ -47,4 +48,4 @@ workflows:
           context: CIRCLE_TOKEN
       
 
-# VS Code Extension Version: 1.0.2
+# VS Code Extension Version: 1.1.1
