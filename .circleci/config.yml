@@ -16,6 +16,7 @@ jobs:
             | jq -r '.id')
             echo $PIPELINE_ID
             echo 'export PIPELINE_ID="$PIPELINE_ID"' >> $BASH_ENV
+            cat $BASH_ENV
             # curl --location --request POST 'https://circleci.com/api/v2/project/gh/jkzilla/circleci-demo-javascript-react-app/envvar' \
             #   --header 'Content-Type: application/json' \
             #   --header "Circle-Token: ${CIRCLE_TOKEN}" \
@@ -27,20 +28,21 @@ jobs:
           name: poll for project b's pipeline status
           command: |
               echo $PIPELINE_ID
-              STATUS=$(curl "https://circleci.com/api/v2/pipeline/$PIPELINE_ID/workflow?circle-token=$CIRCLE_TOKEN" | jq -r '.items[].status')
-              while [ "$STATUS" == "running" ]; do
-                echo still running
-                sleep 10
-                STATUS=$(curl "https://circleci.com/api/v2/pipeline/$PIPELINE_ID/workflow?circle-token=$CIRCLE_TOKEN" | jq -r '.items[].status')
-              done
-              echo "finally done, checking final status: $STATUS"
-              if [[ "$STATUS" == "success" ]]; then
-                echo "Proceeding with build, as triggered pipeline was success"
-                exit 0
-              else
-                echo "Stopping build, triggered pipeline was not a success"
-                exit 1
-              fi
+              cat $BASH_ENV
+              # STATUS=$(curl "https://circleci.com/api/v2/pipeline/$PIPELINE_ID/workflow?circle-token=$CIRCLE_TOKEN" | jq -r '.items[].status')
+              # while [ "$STATUS" == "running" ]; do
+              #   echo still running
+              #   sleep 10
+              #   STATUS=$(curl "https://circleci.com/api/v2/pipeline/$PIPELINE_ID/workflow?circle-token=$CIRCLE_TOKEN" | jq -r '.items[].status')
+              # done
+              # echo "finally done, checking final status: $STATUS"
+              # if [[ "$STATUS" == "success" ]]; then
+              #   echo "Proceeding with build, as triggered pipeline was success"
+              #   exit 0
+              # else
+              #   echo "Stopping build, triggered pipeline was not a success"
+              #   exit 1
+              # fi
 workflows:
   workflow:
     jobs:
