@@ -15,8 +15,9 @@ jobs:
               --header "Circle-Token: ${CIRCLE_TOKEN}" \
             | jq -r '.id')
             echo $PIPELINE_ID >> pipelineId.txt
-            echo 'export PIPELINE_ID=${$PIPELINE_ID}' >> "$BASH_ENV"
+            echo 'export PIPELINE_ID="$PIPELINE_ID"' >> "$BASH_ENV"
             cat $BASH_ENV
+            echo $PIPELINE_ID
             # curl --location --request POST 'https://circleci.com/api/v2/project/gh/jkzilla/circleci-demo-javascript-react-app/envvar' \
             #   --header 'Content-Type: application/json' \
             #   --header "Circle-Token: ${CIRCLE_TOKEN}" \
