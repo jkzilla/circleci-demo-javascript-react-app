@@ -27,7 +27,7 @@ jobs:
               if [[ "$MATCHED_VALUE" == *"$TRUNCATED_VALUE"* ]]; then
                 echo $MATCHED_VALUE
                 echo $TRUNCATED_VALUE
-                echo "WE MATCH!!!!!!: $VARIABLE_NAME"
+                echo "WE MATCH!!!!!!: '$VARIABLE_NAME'"
               fi
             done < listIds.txt
 
