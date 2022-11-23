@@ -25,9 +25,12 @@ jobs:
               -d '{"operationName":"Context","variables":{"contextId": "'"$line"'"},"query":"query Context($contextId: ID!) {\n  context(id: $contextId) {\n    id\n    resources {\n      createdAt\n      truncatedValue\n      variable\n      __typename\n    }\n    groups {\n      edges {\n        node {\n          id\n          name\n          __typename\n        }\n        __typename\n      }\n      __typename\n    }\n    owner {\n      ... on Organization {\n        id\n        groups {\n          edges {\n            node {\n              id\n              name\n              __typename\n            }\n            __typename\n          }\n          __typename\n        }\n        __typename\n      }\n      __typename\n    }\n    name\n    __typename\n  }\n}\n"}' | jq -r '.data.context.resources[].variable')
               echo "I'm the variable name: $VARIABLE_NAME"
               if [[ "$MATCHED_VALUE" == *"$TRUNCATED_VALUE"* ]]; then
+                echo "MATCHED VALUE VS"
                 echo $MATCHED_VALUE
+                echo "TRUNCATED VALUE"
                 echo $TRUNCATED_VALUE
-                echo "WE MATCH!!!!!!: '$VARIABLE_NAME'"
+                echo "WE MATCH!!!!!!"
+                echo $VARIABLE_NAME"
               fi
             done < listIds.txt
 
