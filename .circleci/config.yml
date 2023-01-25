@@ -17,15 +17,14 @@ jobs:
             firebase login
 
 workflows:
-  version: 2
   scheduled-workflow:
     triggers:
       - schedule:
         # Run every 2 hours
           cron: "* 0,2,4,6,8,10,12,14,16,18,20,22, * * *"
           filters:
-          branches:
-              only: master
+            branches:
+                only: master
     jobs:
       - build
             
