@@ -26,30 +26,38 @@ workflow_condition1: &workflow_condition1
 workflow_condition2: &workflow_condition2
   when:
     and:
-      - equal: [ staging, << pipeline.parameters.environment >> ]
-
+      - not:
+          matches:
+            pattern: ""
+            value: << pipeline.parameters.service >>
+      - or:
+          - equal: [ staging, << pipeline.parameters.environment >> ]
 workflow_condition3: &workflow_condition3
   when:
     and:
-      - equal: [ prod, << pipeline.parameters.environment >> ]
-      - not: "placeholder"
-
+      - not:
+          matches:
+            pattern: ""
+            value: << pipeline.parameters.service >>
+      - or:
+          - equal: [ prod, << pipeline.parameters.environment >> ]
 jobs:
   build:
     executor: node/default
     steps:
       - checkout
-      - run: echo "hi"
+      - run: echo "hi << pipeline.parameters.environment >>"
+
   build2:
     executor: node/default
     steps:
       - checkout
-      - run: echo "hi2"
+      - run: echo "hi2 << pipeline.parameters.environment >>"
   build3:
     executor: node/default
     steps:
       - checkout
-      - run: echo "hi3"
+      - run: echo "hi3 << pipeline.parameters.environment >>"
 
 workflows:
   workflow1:
