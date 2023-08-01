@@ -1,21 +1,24 @@
 version: 2.1
 
+orbs:
+  node: circleci/node@5.1.0
+
+parameters:
+  service:
+    type: enum
+    enum: [dev, report]
+    default: dev
+
 workflow_condition1: &workflow_condition1
   when:
     and:
       - or:
-        - equal: [ staging, << pipeline.parameters.environment >> ]
-        - equal: [ production, << pipeline.parameters.environment >> ]
-        - not:
-            equal: [ "", << pipeline.parameters.imageName >> ]
-        - not:
-            equal: [ "", << pipeline.parameters.imageTag >> ]
-        - not:
-            equal: [ "", << pipeline.parameters.serviceName >> ]
+        - equal: [ dev, << pipeline.parameters.service >> ]
+      - not: ["",  << pipeline.parameters.service >> ]
+
 jobs:
   build:
-    docker:
-      - image: cimg/node
+    executor: node/default
     steps:
       - checkout
       - run: echo "hi"
