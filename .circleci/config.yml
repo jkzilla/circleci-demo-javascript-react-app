@@ -7,30 +7,32 @@ parameters:
   environment:
     type: enum
     enum: [dev, staging, prod]
-    default: staging
+    default: dev
   service:
     description: Name of the service
     type: string
-    default: "placeholder"
+    default: frontend
 
 workflow_condition1: &workflow_condition1
   when:
     and:
+      - not:
+          matches:
+            pattern: ""
+            value: << pipeline.parameters.service >>
       - or:
-        - equal: [ dev, << pipeline.parameters.service >> ]
-      - not: ["placeholder",  << pipeline.parameters.service >> ]
+          - equal: [ dev, << pipeline.parameters.environment >> ]
 
 workflow_condition2: &workflow_condition2
   when:
     and:
       - equal: [ staging, << pipeline.parameters.environment >> ]
-      - not: ["placeholder",  << pipeline.parameters.service >> ]
 
 workflow_condition3: &workflow_condition3
   when:
     and:
       - equal: [ prod, << pipeline.parameters.environment >> ]
-      - not: ["placeholder",  << pipeline.parameters.service >> ]
+      - not: "placeholder"
 
 jobs:
   build:
