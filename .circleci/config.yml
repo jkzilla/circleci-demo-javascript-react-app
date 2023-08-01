@@ -11,7 +11,7 @@ parameters:
   service:
     description: Name of the service
     type: string
-    default: frontend
+    default: ""
 
 workflow_condition1: &workflow_condition1
   when:
