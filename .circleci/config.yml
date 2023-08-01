@@ -4,10 +4,14 @@ orbs:
   node: circleci/node@5.1.0
 
 parameters:
-  service:
+  environment:
     type: enum
-    enum: [dev, report]
-    default: dev
+    enum: [dev, staging, prod]
+    default: staging
+  service:
+    description: Name of the service
+    type: string
+    default: ""
 
 workflow_condition1: &workflow_condition1
   when:
@@ -16,15 +20,45 @@ workflow_condition1: &workflow_condition1
         - equal: [ dev, << pipeline.parameters.service >> ]
       - not: ["",  << pipeline.parameters.service >> ]
 
+staging_condition: &staging_condition
+  when:
+    and:
+      - equal: [ staging, << pipeline.parameters.environment >> ]
+      - not: ["",  << pipeline.parameters.service >> ]
+
+prod_condition: &prod_condition
+  when:
+    and:
+      - equal: [ prod, << pipeline.parameters.environment >> ]
+      - not: ["",  << pipeline.parameters.service >> ]
+
 jobs:
   build:
     executor: node/default
     steps:
       - checkout
       - run: echo "hi"
+  build2:
+    executor: node/default
+    steps:
+      - checkout
+      - run: echo "hi2"
+  build3:
+    executor: node/default
+    steps:
+      - checkout
+      - run: echo "hi3"
 
 workflows:
   workflow1:
     # <<: *workflow_condition1
     jobs:
       - build
+  workflow2:
+    # <<: *workflow_condition2
+    jobs:
+      - build2
+  workflow3:
+    # <<: *workflow_condition3
+    jobs:
+      - build3
