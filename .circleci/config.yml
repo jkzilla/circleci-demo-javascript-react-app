@@ -7,7 +7,7 @@ parameters:
   environment:
     type: enum
     enum: [dev, staging, prod]
-    default: staging
+    default: dev
   service:
     description: Name of the service
     type: string
