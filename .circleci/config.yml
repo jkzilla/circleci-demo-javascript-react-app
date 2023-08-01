@@ -1,57 +1,27 @@
 version: 2.1
 
+workflow_condition1: &workflow_condition1
+  when:
+    and:
+      - or:
+        - equal: [ staging, << pipeline.parameters.environment >> ]
+        - equal: [ production, << pipeline.parameters.environment >> ]
+        - not:
+            equal: [ "", << pipeline.parameters.imageName >> ]
+        - not:
+            equal: [ "", << pipeline.parameters.imageTag >> ]
+        - not:
+            equal: [ "", << pipeline.parameters.serviceName >> ]
 jobs:
   build:
     docker:
-      - image: cimg/python:3.11.0
-    resource_class: small 
-    steps: 
+      - image: cimg/node
+    steps:
       - checkout
-      - run:
-          name: check if a match
-          command: |
-            bash bashScript.sh
-            
+      - run: echo "hi"
 
-# curl --request GET 'https://circleci.com/api/v2/context?owner-id=39114a72-17c0-4a08-96b6-5d6e8126b7f2' --header "circle-token: ${CIRCLE_TOKEN}"  | jq -r '.'
-
-#             curl -X POST -H content-type:application/json -H Authorization:$CIRCLE_TOKEN \
-#               https://circleci.com/graphql-unstable \
-#               -d '{"operationName":"Context","variables":{"contextId":"5728330b-74d6-4f6e-be8e-e5369cdb6ae3"},"query":"query Context($contextId: ID!) {\n  context(id: $contextId) {\n    id\n    resources {\n      createdAt\n      truncatedValue\n      variable\n      __typename\n    }\n    groups {\n      edges {\n        node {\n          id\n          name\n          __typename\n        }\n        __typename\n      }\n      __typename\n    }\n    owner {\n      ... on Organization {\n        id\n        groups {\n          edges {\n            node {\n              id\n              name\n              __typename\n            }\n            __typename\n          }\n          __typename\n        }\n        __typename\n      }\n      __typename\n    }\n    name\n    __typename\n  }\n}\n"}' | jq
-#       - run:
-#           name: trigger project b's pipeline
-#           command: |
-#             export PIPELINE_ID=$(curl --location --request POST 'https://circleci.com/api/v2/project/github/jkzilla/cci-demo101b/pipeline' \
-#               --header 'Content-Type: application/json' \
-#               --header "Circle-Token: ${CIRCLE_TOKEN}" \
-#             | jq -r '.id')
-#             echo $PIPELINE_ID >> pipelineId.txt
-#             echo "export PIPELINE_ID='$PIPELINE_ID'" >> "$BASH_ENV"
-#             cat $BASH_ENV
-#             echo $PIPELINE_ID
-#       - run:
-#           name: poll for project b's pipeline status
-#           command: |
-#               echo $PIPELINE_ID
-#               cat $BASH_ENV
-#               STATUS=$(curl "https://circleci.com/api/v2/pipeline/$PIPELINE_ID/workflow?circle-token=$CIRCLE_TOKEN" | jq -r '.items[].status')
-#               while [ "$STATUS" == "running" ]; do
-#                 echo still running
-#                 sleep 10
-#                 STATUS=$(curl "https://circleci.com/api/v2/pipeline/$PIPELINE_ID/workflow?circle-token=$CIRCLE_TOKEN" | jq -r '.items[].status')
-#               done
-#               echo "finally done, checking final status: $STATUS"
-#               if [[ "$STATUS" == "success" ]]; then
-#                 echo "Proceeding with build, as triggered pipeline was success"
-#                 exit 0
-#               else
-#                 echo "Stopping build, triggered pipeline was not a success"
-#                 exit 1
-#               fi
 workflows:
-  workflow:
+  workflow1:
+    # <<: *workflow_condition1
     jobs:
-      - build: 
-          context: CIRCLE_TOKEN
-
-# VS Code Extension Version: 1.1.1
+      - build
