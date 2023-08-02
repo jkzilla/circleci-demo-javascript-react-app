@@ -1,74 +1,15 @@
 version: 2.1
 
-orbs:
-  node: circleci/node@5.1.0
-
-parameters:
-  environment:
-    type: enum
-    enum: [dev, staging, prod]
-    default: dev
-  service:
-    description: Name of the service
-    type: string
-    default: frontend
-
-workflow_condition1: &workflow_condition1
-  when:
-    and:
-      - not:
-          matches:
-            pattern: ""
-            value: << pipeline.parameters.service >>
-      - or:
-          - equal: [ dev, << pipeline.parameters.environment >> ]
-
-workflow_condition2: &workflow_condition2
-  when:
-    and:
-      - not:
-          matches:
-            pattern: ""
-            value: << pipeline.parameters.service >>
-      - or:
-          - equal: [ staging, << pipeline.parameters.environment >> ]
-workflow_condition3: &workflow_condition3
-  when:
-    and:
-      - not:
-          matches:
-            pattern: ""
-            value: << pipeline.parameters.service >>
-      - or:
-          - equal: [ prod, << pipeline.parameters.environment >> ]
 jobs:
   build:
-    executor: node/default
+    docker:
+      - image: cimg/base:2023.06
+    resource_class: arm.medium
     steps:
       - checkout
-      - run: echo "hi << pipeline.parameters.environment >>"
-
-  build2:
-    executor: node/default
-    steps:
-      - checkout
-      - run: echo "hi2 << pipeline.parameters.environment >>"
-  build3:
-    executor: node/default
-    steps:
-      - checkout
-      - run: echo "hi3 << pipeline.parameters.environment >>"
+      - run: echo "hi"
 
 workflows:
   workflow1:
-    <<: *workflow_condition1
     jobs:
       - build
-  workflow2:
-    <<: *workflow_condition2
-    jobs:
-      - build2
-  workflow3:
-    <<: *workflow_condition3
-    jobs:
-      - build3
