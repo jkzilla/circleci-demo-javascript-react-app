@@ -1,15 +1,24 @@
 version: 2.1
 
+orbs:
+  node: circleci/node@5.1.0
+
+parameters:
+  flag:
+    type: boolean
+    default: false
+
 jobs:
   build:
-    docker:
-      - image: cimg/base:2023.06
-    resource_class: arm.medium
+    executor: node/default
     steps:
       - checkout
-      - run: echo "hi"
+      - run: 
+          environment:
+            PARAM_FLAG: << pipeline.parameters.flag >>
+          command: echo "hi $PARAM_FLAG"
 
 workflows:
-  workflow1:
-    jobs:
-      - build
+    workflow1:
+      jobs:
+        - build
