@@ -20,7 +20,7 @@ jobs:
       - run: 
           environment:
             PARAM_FLAG: << pipeline.parameters.flag >>
-          command: ./paramScript << pipeline.parameters.flag >>
+          command: ./paramScript.sh << pipeline.parameters.flag >>
 workflows:
     workflow1:
       jobs:
