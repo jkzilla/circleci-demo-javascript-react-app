@@ -6,7 +6,6 @@ jobs:
       - image: cimg/base:stable
     environment:
       IMAGE_TAG: docker/scout-demo-service:latest
-    resource_class: jkzilla/container-runner
     steps:
       # Checkout the repository files
       - checkout
