@@ -3,7 +3,7 @@ version: 2.1
 jobs:
   build:
     docker:
-      - image: cimg/base:stable
+      - image: cimg/base:$IMAGE_TAG
     environment:
       IMAGE_TAG: docker/scout-demo-service:latest
     resource_class: jkzilla/container-runner
