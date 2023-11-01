@@ -4,7 +4,7 @@ jobs:
   build:
     docker:
       - image: cimg/base:2021.11
-    resource_class: jkzilla/contatiner-runner
+    resource_class: jkg-namespace/contatiner-runner
     steps:
       - checkout
       - run: echo "Hi I'm on Runner!"
