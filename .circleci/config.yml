@@ -7,6 +7,8 @@ jobs:
   build:
     docker:
       - image: cimg/base:stable
+    parallelism: 50
+    resource_class: small
     steps:
       # Checkout the repository files
       - checkout
