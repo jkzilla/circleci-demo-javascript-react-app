@@ -1,29 +1,966 @@
+# --- START NEW CONFIG
+docker_setup: &docker_setup
+  docker:
+    - image: cimg/ruby:3.0.6-node
+      environment:
+        RAILS_ENV: test
+        BUNDLE_VERSION: 2.1.4
+  working_directory: ~/sumzero
+
+pr_only: &pr_only
+  filters:
+    branches:
+      ignore:
+        - master
+    tags:
+      ignore:
+        - /.*/
+
 version: 2.1
 
 orbs:
   browser-tools: circleci/browser-tools@1.4.6
 
 jobs:
-  build:
-    docker:
-      - image: cimg/base:stable
-    parallelism: 50
-    resource_class: medium
+  checkout_code:
+    <<: *docker_setup
     steps:
-      # Checkout the repository files
       - checkout
-      - browser-tools/install-browser-tools:
-          chrome-version: 116.0.5845.96
+      - save_cache:
+          key: v2-repo-{{ .Environment.CIRCLE_SHA1 }}
+          paths:
+            - .
+
+  # BUILD STEPS
+  bundle_ruby:
+    <<: *docker_setup
+    steps:
+      - restore_cache:
+          key: v2-repo-{{ .Environment.CIRCLE_SHA1 }}
+      - restore_cache:
+          key: v2-bundle-{{ checksum "Gemfile.lock" }}-test
+      - run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+      - run: gem install bundler:$BUNDLE_VERSION
+      - run: bundle config set path 'vendor/bundle'
+      - run: bundle install
+      - save_cache:
+          key: v2-bundle-{{ checksum "Gemfile.lock" }}-test
+          paths:
+            - ~/sumzero/vendor/bundle
+
+  package_node:
+    <<: *docker_setup
+    steps:
+      - restore_cache:
+          key: v2-repo-{{ .Environment.CIRCLE_SHA1 }}
+      - restore_cache:
+          key: v1-package-{{ checksum "yarn.lock" }}-test
+      - restore_cache:
+          key: v4-graphql-typings-{{ checksum "webpack/buyside/graphql/schema.json" }}-test
+      - run: yarn install
+      - run: yarn run codegen
+      - save_cache:
+          key: v1-package-{{ checksum "yarn.lock" }}-test
+          paths:
+            - ~/sumzero/node_modules
+      - save_cache:
+          key: v4-graphql-typings-{{ checksum "webpack/buyside/graphql/schema.json" }}-test
+          paths:
+            - ~/sumzero/webpack/interfaces/graphql-typings.tsx
+
+  # TESTS
+  run_rspec:
+    docker:
+      - image: cimg/ruby:3.0.6-node
+        environment:
+          RAILS_ENV: test
+          DB_HOST: 127.0.0.1
+          RACK_ENV: test
+          BUNDLE_VERSION: 2.0.2
+          MYSQL_HOST: 127.0.0.1
+          ELASTICSEARCH_URL: localhost:9200
+      - image: cimg/mysql:8.0
+        command:
+          [
+            --character-set-server=latin1,
+            --collation-server=latin1_swedish_ci,
+            --character-set-client-handshake=OFF,
+          ]
+        environment:
+          MYSQL_ROOT_HOST: '%'
+          MYSQL_ROOT_PASSWORD: test
+      - image: elasticsearch:7.10.1
+        environment:
+          discovery.type: single-node
+          TAKE_FILE_OWNERSHIP: true
+      - image: cimg/redis:5.0.14
+    working_directory: ~/sumzero
+    parallelism: 5
+    steps:
+      - restore_cache:
+          key: v2-repo-{{ .Environment.CIRCLE_SHA1 }}
+      - restore_cache:
+          key: v2-bundle-{{ checksum "Gemfile.lock" }}-test
+      - run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+      - run: gem install bundler:$BUNDLE_VERSION
+      - run: bundle config set path 'vendor/bundle'
+      - run: bundle install
+      - run: dockerize -wait tcp://localhost:3306 -timeout 1m
+      - run: dockerize -wait tcp://localhost:9200 -timeout 1m
+      - run: sudo apt-get --allow-releaseinfo-change update && sudo apt-get install mariadb-client -y
+      - run: bundle exec rails db:create
+      - run: bundle exec rails db:structure:load
+      - run: mkdir ~/rspec
+      - run:
+          name: run tests
+          command: |
+            circleci tests glob "./spec/**/*_spec.rb" | circleci tests run --command="RUBYOPT=-W0 xargs bundle exec rspec --format progress --format RspecJunitFormatter -o ~/rspec/rspec.xml --tag=~js" --split-by=timings
+      - store_test_results:
+          path: ~/rspec
+      - store_artifacts:
+          path: ~/rspec
+
+  run_jest:
+    <<: *docker_setup
+    parallelism: 3
+    steps:
+      - restore_cache:
+          key: v2-repo-{{ .Environment.CIRCLE_SHA1 }}
+      - restore_cache:
+          key: v1-package-{{ checksum "yarn.lock" }}-test
+      - restore_cache:
+          key: v4-graphql-typings-{{ checksum "webpack/buyside/graphql/schema.json" }}-test
+      - run:
+          name: run test
+          command: |
+            yarn jest --listTests | circleci tests run --command="NODE_OPTIONS=--unhandled-rejections=warn xargs yarn test --ci" --verbose --split-by=timings
+          environment:
+            JEST_JUNIT_ADD_FILE_ATTRIBUTE: 'true'
+      - run:
+          command: cp junit.xml ~/junit/
+          when: always
+      - store_test_results:
+          path: ~/junit
+      - store_artifacts:
+          path: ~/junit
+
+  run_capybara_specs:
+    docker:
+      - image: cimg/ruby:3.0.6-browsers
+        environment:
+          RAILS_ENV: test
+          DB_HOST: 127.0.0.1
+          RACK_ENV: test
+          BUNDLE_VERSION: 2.0.2
+          MYSQL_HOST: 127.0.0.1
+          ELASTICSEARCH_URL: localhost:9200
+      - image: cimg/mysql:8.0
+        command:
+          [
+            --character-set-server=latin1,
+            --collation-server=latin1_swedish_ci,
+            --character-set-client-handshake=OFF,
+          ]
+        environment:
+          MYSQL_ROOT_HOST: '%'
+          MYSQL_ROOT_PASSWORD: test
+      - image: elasticsearch:7.10.1
+        environment:
+          discovery.type: single-node
+          TAKE_FILE_OWNERSHIP: true
+      - image: cimg/redis:5.0.14
+    working_directory: ~/sumzero
+    parallelism: 5
+    resource_class: xlarge
+    steps:
+      - restore_cache:
+          key: v2-repo-{{ .Environment.CIRCLE_SHA1 }}
+      - restore_cache:
+          key: v2-bundle-{{ checksum "Gemfile.lock" }}-test
+      - restore_cache:
+          key: v1-package-{{ checksum "yarn.lock" }}-test
+      - restore_cache:
+          key: v4-graphql-typings-{{ checksum "webpack/buyside/graphql/schema.json" }}-test
+      - browser-tools/install-chrome:
+          chrome-version: 114.0.5735.90
+          replace-existing: true
       - browser-tools/install-chromedriver
       - run:
           command: |
             google-chrome --version
-            firefox --version
-            geckodriver --version
             chromedriver --version
           name: Check install
+      - run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+      - run: gem install bundler:$BUNDLE_VERSION
+      - run: bundle config set path 'vendor/bundle'
+      - run: bundle install
+      - run: dockerize -wait tcp://localhost:3306 -timeout 1m
+      - run: dockerize -wait tcp://localhost:9200 -timeout 1m
+      - run: sudo apt-get --allow-releaseinfo-change update && sudo apt-get install mariadb-client -y
+      - run: bundle exec rails db:create
+      - run: bundle exec rails db:structure:load
+      - run:
+          name: webpack-circle-build
+          command: yarn webpack-circle-serve-assets --env.gtm_auth_dev=$GTM_AUTH_DEV --env.gtm_preview_dev=$GTM_PREVIEW_DEV --env.rollbar_client_access_token=$ROLLBAR_CLIENT_ACCESS_TOKEN --env.stripe_key_dev=$STRIPE_KEY_DEV
+          background: true
+      - run: mkdir ~/rspec
+      - run:
+          name: run tests
+          command: |
+            circleci tests glob "./spec/**/*_spec.rb" | circleci tests run --command="RUBYOPT=-W0 SERVE_LOCAL_ASSETS=true xargs bundle exec rspec --format progress --format RspecJunitFormatter -o ~/rspec/capybara.xml --tag=js" --split-by=timings
+      - store_test_results:
+          path: ~/rspec
+      - store_artifacts:
+          path: ~/rspec
 
+  # LINTERS
+  run_rubocop:
+    <<: *docker_setup
+    steps:
+      - restore_cache:
+          key: v2-repo-{{ .Environment.CIRCLE_SHA1 }}
+      - restore_cache:
+          key: v2-bundle-{{ checksum "Gemfile.lock" }}-test
+      - run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+      - run: gem install bundler:$BUNDLE_VERSION
+      - run: bundle config set path 'vendor/bundle'
+      - run: bundle install
+      - run:
+          name: run rubocop
+          command: |
+            bundle exec rubocop --format progress --format junit --out test_results/rubocop/results.xml
+      - store_test_results:
+          path: test_results
+
+  run_typescript:
+    <<: *docker_setup
+    steps:
+      - restore_cache:
+          key: v2-repo-{{ .Environment.CIRCLE_SHA1 }}
+      - restore_cache:
+          key: v1-package-{{ checksum "yarn.lock" }}-test
+      - restore_cache:
+          key: v4-graphql-typings-{{ checksum "webpack/buyside/graphql/schema.json" }}-test
+      - run:
+          name: run typescript
+          command: |
+            yarn check-types
+
+  run_eslint:
+    <<: *docker_setup
+    steps:
+      - restore_cache:
+          key: v2-repo-{{ .Environment.CIRCLE_SHA1 }}
+      - restore_cache:
+          key: v1-package-{{ checksum "yarn.lock" }}-test
+      - restore_cache:
+          key: v4-graphql-typings-{{ checksum "webpack/buyside/graphql/schema.json" }}-test
+      - run:
+          name: run eslint
+          command: yarn lint --format junit --output-file test_results/eslint/results.xml
+      - store_test_results:
+          path: test_results
+
+  # --- END NEW CONFIG
+
+  start_build:
+    working_directory: /app
+    docker:
+      - image: docker:17.05.0-ce-git
+    steps:
+      - run:
+          name: Print SHA
+          command: |
+            echo $CIRCLE_SHA1
+  asset-image-build:
+    working_directory: /app/sumzero
+    docker:
+      - image: docker:17.05.0-ce-git
+    steps:
+      - setup_remote_docker
+      - checkout
+      - run:
+          name: Pull assets Docker image (alternative to native Circle docker layer caching)
+          command: |
+            set +o pipefail
+            docker login -u $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_NAME -p $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_PASSWORD
+            docker pull sumzero/assets:latest || true
+      - run:
+          name: Build assets Docker image
+          command: |
+            set +o pipefail
+            cd /app/sumzero
+            docker build --cache-from sumzero/assets:latest --file Dockerfile-assets -t sumzero/assets:$CIRCLE_SHA1 .
+            docker tag sumzero/assets:$CIRCLE_SHA1 sumzero/assets:latest
+      - run:
+          name: Push assets image to dockerhub
+          command: |
+            set +o pipefail
+            cd /app/sumzero
+            docker push sumzero/assets:$CIRCLE_SHA1
+            docker push sumzero/assets:latest
+  sumzero-image-build:
+    working_directory: /app/sumzero
+    docker:
+      - image: docker:17.05.0-ce-git
+    steps:
+      - setup_remote_docker
+      - checkout
+      - run:
+          name: Pull SumZero Docker image (alternative to native Circle docker layer caching)
+          command: |
+            set +o pipefail
+            docker login -u $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_NAME -p $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_PASSWORD
+            docker pull sumzero/sumzero:latest || true
+      - run:
+          name: Build application Docker image
+          command: |
+            set +o pipefail
+            cd /app/sumzero
+            docker build --cache-from=sumzero/sumzero:latest --target prod -t sumzero/sumzero:$CIRCLE_SHA1 .
+            docker tag sumzero/sumzero:$CIRCLE_SHA1 sumzero/sumzero:latest
+            docker build --cache-from=sumzero/sumzero:latest --target test -t sumzero/sumzero:$CIRCLE_SHA1-test .
+      - run:
+          name: Push sumzero image to dockerhub
+          command: |
+            set +o pipefail
+            cd /app/sumzero
+            docker push sumzero/sumzero:$CIRCLE_SHA1
+            docker push sumzero/sumzero:latest
+            docker push sumzero/sumzero:$CIRCLE_SHA1-test
+  js-assets-build:
+    working_directory: /app/sumzero
+    docker:
+      - image: docker:17.05.0-ce-git
+    steps:
+      - setup_remote_docker
+      - run:
+          name: Load image from dockerhub (separated to show runtime)
+          command: |
+            set +o pipefail
+            docker login -u $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_NAME -p $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_PASSWORD
+            docker pull sumzero/aws-cli-alpine
+            docker pull sumzero/assets:$CIRCLE_SHA1
+      - run:
+          name: compile assets
+          command: |
+            set +o pipefail
+
+            mkdir -p /tmp/assets
+
+            docker run -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY -v /tmp/assets:/usr/src/app/public/assets/webpack sumzero/assets:$CIRCLE_SHA1 yarn run webpack-circle-build --env.stripe_key_prod=$STRIPE_PUBLIC_KEY --env.gtm_auth=$GTM_AUTH --env.gtm_preview=$GTM_PREVIEW --env.rollbar_client_access_token=$ROLLBAR_CLIENT_ACCESS_TOKEN --env.rollbar_server_access_token=$ROLLBAR_SERVER_ACCESS_TOKEN --env.release_sha=$CIRCLE_SHA1
+      - run:
+          name: upload assets
+          command: |
+            set +o pipefail
+
+            docker run -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY -v /tmp/assets:/tmp/assets sumzero/aws-cli-alpine aws s3 sync /tmp/assets s3://sz-assets-dev/webpack/assets/$CIRCLE_SHA1 --grants read=uri=http://acs.amazonaws.com/groups/global/AllUsers
+            docker run -e AWS_ACCESS_KEY_ID=$STAGING_AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY=$STAGING_AWS_SECRET_ACCESS_KEY -v /tmp/assets:/tmp/assets sumzero/aws-cli-alpine aws s3 sync /tmp/assets s3://sz-assets-staging/webpack/assets/$CIRCLE_SHA1 --grants read=uri=http://acs.amazonaws.com/groups/global/AllUsers
+  js-tests:
+    working_directory: /app/sumzero
+    docker:
+      - image: docker:17.05.0-ce-git
+    steps:
+      - setup_remote_docker
+      - run:
+          name: Load image from dockerhub (separated to show runtime)
+          command: |
+            set +o pipefail
+            docker login -u $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_NAME -p $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_PASSWORD
+            docker pull sumzero/assets
+      - run:
+          name: Run JS tests
+          command: |
+            set +o pipefail
+            docker run sumzero/assets yarn test
+  ruby-specs:
+    working_directory: /app/sumzero
+    parallelism: 3
+    docker:
+      - image: docker:17.05.0-ce-git
+    steps:
+      - setup_remote_docker
+      - checkout
+      - run:
+          name: Load image from dockerhub (separated to show runtime)
+          command: |
+            set +o pipefail
+            docker login -u $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_NAME -p $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_PASSWORD
+            docker pull sumzero/sumzero:$CIRCLE_SHA1-test
+      - run:
+          name: Create a docker network for test
+          command: |
+            docker network create net
+      - run:
+          name: Bring up Mysql 8.0
+          command: |
+            docker run -d -e MYSQL_ROOT_PASSWORD=test --name db --network net --publish 3306:3306 mysql:8.0 --character-set-server=latin1 --collation-server=latin1_swedish_ci --character-set-client-handshake=OFF
+      - run:
+          name: ensure mysql is running
+          command: docker run --rm --network net jwilder/dockerize -wait tcp://db:3306 -timeout 1m
+      - run:
+          name: Prepare test db
+          command: |
+            docker run --rm --network net --name sumzero -e RAILS_ENV=test -e STRIPE_SECRET_KEY -e STRIPE_ENDPOINT_SECRET -e STRIPE_BUYSIDE_PRO_PLAN_ID -e STRIPE_RETAIL_TIER_1_PLAN_ID -e STRIPE_RETAIL_TIER_2_PLAN_ID -e STRIPE_RETAIL_TIER_3_PLAN_ID -e STRIPE_RETAIL_TIER_1_MONTHLY_PLAN_ID -e STRIPE_RETAIL_TIER_2_MONTHLY_PLAN_ID -e STRIPE_RETAIL_TIER_3_MONTHLY_PLAN_ID -e STRIPE_SUMZERO_STRATEGIES_MONTHLY_PLAN_ID -e STRIPE_SUMZERO_STRATEGIES_ANNUAL_PLAN_ID -e FS_DATA_DIRECT_PASSWORD -e MYSQL_HOST=db sumzero/sumzero:$CIRCLE_SHA1-test bundle exec rake db:create
+            docker run --rm --network net --name sumzero -e RAILS_ENV=test -e STRIPE_SECRET_KEY -e STRIPE_ENDPOINT_SECRET -e STRIPE_BUYSIDE_PRO_PLAN_ID -e STRIPE_RETAIL_TIER_1_PLAN_ID -e STRIPE_RETAIL_TIER_2_PLAN_ID -e STRIPE_RETAIL_TIER_3_PLAN_ID -e STRIPE_RETAIL_TIER_1_MONTHLY_PLAN_ID -e STRIPE_RETAIL_TIER_2_MONTHLY_PLAN_ID -e STRIPE_RETAIL_TIER_3_MONTHLY_PLAN_ID -e STRIPE_SUMZERO_STRATEGIES_MONTHLY_PLAN_ID -e STRIPE_SUMZERO_STRATEGIES_ANNUAL_PLAN_ID -e FS_DATA_DIRECT_PASSWORD -e MYSQL_HOST=db sumzero/sumzero:$CIRCLE_SHA1-test bundle exec rake db:test:prepare
+      - run:
+          name: Bring up Elasticsearch
+          command: |
+            docker run -d --network net --name elasticsearch -e "discovery.type=single-node" -p 9200:9200 elasticsearch:7.10.1
+      - run:
+          name: Ensure ES is running
+          command: docker run --rm --network net jwilder/dockerize -wait tcp://elasticsearch:9200 -timeout 3m
+      - run:
+          name: Spin up Redis
+          command: |
+            docker run -d --network net --name redis -p 6379:6379 redis:4.0.11
+      - run:
+          name: Ensure Redis is running
+          command: docker run --rm --network net jwilder/dockerize -wait tcp://redis:6379 -timeout 1m
+      - run:
+          name: Run ruby-specs
+          command: |
+            cd /app/sumzero
+            echo "Running specs from..."
+            circleci tests glob "**/*_spec.rb" | circleci tests split | wc -l
+            echo "files"
+            export SPEC_FILES=$(circleci tests glob "**/*_spec.rb" | circleci tests split | tr '\n' ' ')
+            mkdir -p /test_results
+            docker run --network net --name sumzero -e RAILS_ENV=test -e MYSQL_HOST=db -e CIRCLECI=true -e CIRCLE_JOB=deploy -e KNAPSACK_GENERATE_REPORT=true -e RELEASE_SHA=$CIRCLE_SHA1 -e STRIPE_SECRET_KEY -e STRIPE_ENDPOINT_SECRET -e SUMZERO_BASE_URL -e STRIPE_BUYSIDE_PRO_PLAN_ID -e STRIPE_RETAIL_TIER_1_PLAN_ID -e STRIPE_RETAIL_TIER_2_PLAN_ID -e STRIPE_RETAIL_TIER_3_PLAN_ID -e STRIPE_RETAIL_TIER_1_MONTHLY_PLAN_ID -e STRIPE_RETAIL_TIER_2_MONTHLY_PLAN_ID -e STRIPE_RETAIL_TIER_3_MONTHLY_PLAN_ID -e STRIPE_SUMZERO_STRATEGIES_MONTHLY_PLAN_ID -e STRIPE_SUMZERO_STRATEGIES_ANNUAL_PLAN_ID -e PRICING_ENDPOINT -e ELASTICSEARCH_URL=elasticsearch:9200 -e TWITTER_ID -e TWITTER_SECRET -e LINKEDIN_ID -e LINKEDIN_SECRET -e SPOTIFY_ID -e SPOTIFY_SECRET sumzero/sumzero:$CIRCLE_SHA1-test bundle exec rspec --format RspecJunitFormatter --out /test_results/rspec-$CIRCLE_NODE_INDEX.xml --format progress $SPEC_FILES --tag=~js
+            docker cp sumzero:/test_results /test_results
+      - store_test_results:
+          path: /test_results
+  capybara-specs:
+    working_directory: /app/sumzero
+    parallelism: 5
+    docker:
+      - image: docker:17.05.0-ce-git
+    steps:
+      - setup_remote_docker
+      - checkout
+      - run:
+          name: Load image from dockerhub (separated to show runtime)
+          command: |
+            set +o pipefail
+            docker login -u $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_NAME -p $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_PASSWORD
+            docker pull sumzero/sumzero:$CIRCLE_SHA1-test
+      - run:
+          name: Create a docker network for test
+          command: |
+            docker network create net
+      - run:
+          name: Bring up Mysql 8.0
+          command: |
+            docker run -d -e MYSQL_ROOT_PASSWORD=test --name db --network net --publish 3306:3306 mysql:8.0 --character-set-server=latin1 --collation-server=latin1_swedish_ci --character-set-client-handshake=OFF
+      - run:
+          name: wait for db
+          command: docker run --rm --network net jwilder/dockerize -wait tcp://db:3306 -timeout 1m
+      - run:
+          name: Prepare test db
+          command: |
+            docker run --rm --network net --name sumzero -e RAILS_ENV=test -e MYSQL_HOST=db -e STRIPE_SECRET_KEY -e STRIPE_ENDPOINT_SECRET -e STRIPE_BUYSIDE_PRO_PLAN_ID -e STRIPE_RETAIL_TIER_1_PLAN_ID -e STRIPE_RETAIL_TIER_2_PLAN_ID -e STRIPE_RETAIL_TIER_3_PLAN_ID -e STRIPE_RETAIL_TIER_1_MONTHLY_PLAN_ID -e STRIPE_RETAIL_TIER_2_MONTHLY_PLAN_ID -e STRIPE_RETAIL_TIER_3_MONTHLY_PLAN_ID -e STRIPE_SUMZERO_STRATEGIES_MONTHLY_PLAN_ID -e STRIPE_SUMZERO_STRATEGIES_ANNUAL_PLAN_ID -e SUMZERO_BASE_URL sumzero/sumzero:$CIRCLE_SHA1-test bundle exec rake db:create
+            docker run --rm --network net --name sumzero -e RAILS_ENV=test -e MYSQL_HOST=db -e STRIPE_SECRET_KEY -e STRIPE_ENDPOINT_SECRET -e STRIPE_BUYSIDE_PRO_PLAN_ID -e STRIPE_RETAIL_TIER_1_PLAN_ID -e STRIPE_RETAIL_TIER_2_PLAN_ID -e STRIPE_RETAIL_TIER_3_PLAN_ID -e STRIPE_RETAIL_TIER_1_MONTHLY_PLAN_ID -e STRIPE_RETAIL_TIER_2_MONTHLY_PLAN_ID -e STRIPE_RETAIL_TIER_3_MONTHLY_PLAN_ID -e STRIPE_SUMZERO_STRATEGIES_MONTHLY_PLAN_ID -e STRIPE_SUMZERO_STRATEGIES_ANNUAL_PLAN_ID -e SUMZERO_BASE_URL sumzero/sumzero:$CIRCLE_SHA1-test bundle exec rake db:test:prepare
+      - run:
+          name: Bring up Elasticsearch
+          command: |
+            docker run -d --network net --name elasticsearch -e "discovery.type=single-node" -p 9200:9200 elasticsearch:7.10.1
+      - run:
+          name: Ensure ES is running
+          command: docker run --rm --network net jwilder/dockerize -wait tcp://elasticsearch:9200 -timeout 3m
+      - run:
+          name: Spin up Redis
+          command: |
+            docker run -d --network net --name redis -p 6379:6379 redis:4.0.11
+      - run:
+          name: Ensure Redis is running
+          command: docker run --rm --network net jwilder/dockerize -wait tcp://redis:6379 -timeout 1m
+      - run:
+          name: Run ruby-specs
+          command: |
+            cd /app/sumzero
+            echo "Running specs from..."
+            circleci tests glob "**/*_spec.rb" | circleci tests split | wc -l
+            echo "files"
+            export SPEC_FILES=$(circleci tests glob "**/*_spec.rb" | circleci tests split | tr '\n' ' ')
+            mkdir -p /test_results
+            docker run --network net --name sumzero -e RAILS_ENV=test -e RUBYOPT=-W0 -e CHROME_HEADLESS=true -e MYSQL_HOST=db -e CIRCLECI -e CIRCLE_JOB=deploy -e KNAPSACK_GENERATE_REPORT=true -e RELEASE_SHA=$CIRCLE_SHA1 -e AWS_REGION -e AWS_S3_FORMAT_THESES_ROLE -e AWS_STS_ACCESS_KEY_ID -e AWS_STS_SECRET_ACCESS_KEY -e AWS_S3_ROLE_SESSION_NAME -e STRIPE_ENDPOINT_SECRET -e STRIPE_SECRET_KEY -e STRIPE_BUYSIDE_PRO_PLAN_ID -e STRIPE_RETAIL_TIER_1_PLAN_ID -e STRIPE_RETAIL_TIER_2_PLAN_ID -e STRIPE_RETAIL_TIER_3_PLAN_ID -e STRIPE_RETAIL_TIER_1_MONTHLY_PLAN_ID -e STRIPE_RETAIL_TIER_2_MONTHLY_PLAN_ID -e STRIPE_RETAIL_TIER_3_MONTHLY_PLAN_ID -e STRIPE_SUMZERO_STRATEGIES_MONTHLY_PLAN_ID -e STRIPE_SUMZERO_STRATEGIES_ANNUAL_PLAN_ID -e SUMZERO_BASE_URL -e ELASTICSEARCH_URL=elasticsearch:9200 -e TWITTER_ID -e TWITTER_SECRET -e LINKEDIN_ID -e LINKEDIN_SECRET -e SPOTIFY_ID -e SPOTIFY_SECRET sumzero/sumzero:$CIRCLE_SHA1-test bundle exec rspec --format RspecJunitFormatter --out /test_results/rspec-$CIRCLE_NODE_INDEX.xml --format progress $SPEC_FILES --tag=js
+            docker cp sumzero:/test_results /test_results
+      - store_test_results:
+          path: /test_results
+
+  # upload_staging_image_to_ecr:
+  #   working_directory: /app/sumzero
+  #   docker:
+  #     - image: docker:17.05.0-ce-git
+  #   steps:
+  #     - setup_remote_docker
+  #     - run:
+  #         name: 'Pull image artifacts'
+  #         command: |
+  #           docker login -u $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_NAME -p $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_PASSWORD
+  #           docker pull sumzero/sumzero:$CIRCLE_SHA1
+  #           docker pull sumzero/aws-cli-alpine
+  #     - run:
+  #         name: 'Publish image to ECR'
+  #         command: |
+  #           eval "$(docker run -e AWS_DEFAULT_REGION=us-east-1 -e AWS_ACCESS_KEY_ID=$STAGING_AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY=$STAGING_AWS_SECRET_ACCESS_KEY sumzero/aws-cli-alpine aws ecr get-login --no-include-email | tr -d '\r\n')"
+  #           export REPOSITORYURI=`docker run -e AWS_DEFAULT_REGION=us-east-1 -e AWS_ACCESS_KEY_ID=$STAGING_AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY=$STAGING_AWS_SECRET_ACCESS_KEY sumzero/aws-cli-alpine /bin/sh -c "aws ecr describe-repositories --repository-names sumzero | jq .repositories[].repositoryUri" | tr -d \"`
+  #           docker tag sumzero/sumzero:$CIRCLE_SHA1 $REPOSITORYURI:$CIRCLE_SHA1
+  #           docker push $REPOSITORYURI:$CIRCLE_SHA1
+  # staging_asset_build:
+  #   working_directory: /app/sumzero
+  #   docker:
+  #     - image: docker:17.05.0-ce-git
+  #   steps:
+  #     - setup_remote_docker
+  #     - run:
+  #         name: Load image from dockerhub (separated to show runtime)
+  #         command: |
+  #           set +o pipefail
+  #           docker login -u $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_NAME -p $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_PASSWORD
+  #           docker pull sumzero/aws-cli-alpine
+  #           docker pull sumzero/assets:$CIRCLE_SHA1
+  #     - run:
+  #         name: compile assets
+  #         no_output_timeout: 30m
+  #         command: |
+  #           set +o pipefail
+  #           mkdir -p /tmp/assets
+  #           docker run -e AWS_ACCESS_KEY_ID=$PROD_AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY=$PROD_AWS_SECRET_ACCESS_KEY -v /tmp/assets:/usr/src/app/public/assets/webpack sumzero/assets:$CIRCLE_SHA1 yarn run webpack-staging-build --env.stripe_key_prod=$STRIPE_PUBLIC_KEY --env.gtm_auth=$GTM_AUTH --env.gtm_preview=$GTM_PREVIEW --env.rollbar_client_access_token=$ROLLBAR_CLIENT_ACCESS_TOKEN --env.rollbar_server_access_token=$ROLLBAR_SERVER_ACCESS_TOKEN --env.release_sha=$CIRCLE_SHA1
+  #     - run:
+  #         name: upload assets
+  #         command: |
+  #           set +o pipefail
+  #           docker run -e AWS_ACCESS_KEY_ID=$STAGING_AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY=$STAGING_AWS_SECRET_ACCESS_KEY -v /tmp/assets:/tmp/assets sumzero/aws-cli-alpine aws s3 sync /tmp/assets s3://sz-assets-staging/webpack/assets/$CIRCLE_SHA1 --grants read=uri=http://acs.amazonaws.com/groups/global/AllUsers
+  # plan_deploy_staging:
+  #   working_directory: /app/sumzero
+  #   docker:
+  #     - image: docker:17.05.0-ce-git
+  #   steps:
+  #     - setup_remote_docker
+  #     - run:
+  #         name: 'Pull image artifacts'
+  #         command: |
+  #           docker login -u $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_NAME -p $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_PASSWORD
+  #           docker pull sumzero/aws-cli-alpine
+  #           docker pull sumzero/thunderstorm:staging
+  #     - run:
+  #         name: 'Plan deployment to staging using terraform'
+  #         command: |
+  #           docker run -e RAILS_MASTER_KEY=$RAILS_MASTER_KEY -e AWS_DEFAULT_REGION=us-east-1 -e AWS_ACCESS_KEY_ID=$STAGING_AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY=$STAGING_AWS_SECRET_ACCESS_KEY -e SUMZERO_BASE_URL=$STAGING_SUMZERO_BASE_URL -e AWS_S3_OLD_AWS_ACCESS_KEY_ID=$AWS_S3_OLD_AWS_ACCESS_KEY_ID -e AWS_S3_OLD_AWS_SECRET_ACCESS_KEY=$AWS_S3_OLD_AWS_SECRET_ACCESS_KEY sumzero/thunderstorm:staging plan -target='module.SumZero.aws_ecs_service.main' -target='module.SumZero.module.task.aws_ecs_task_definition.main' -target='module.queues' -target='module.scheduled_tasks' -var "image_version=$CIRCLE_SHA1" -var-file="environments/staging/main.tfvars"
+  # deploy_staging:
+  #   working_directory: /app/sumzero
+  #   docker:
+  #     - image: docker:17.05.0-ce-git
+  #   steps:
+  #     - setup_remote_docker
+  #     - run:
+  #         name: 'Pull image artifacts'
+  #         command: |
+  #           docker login -u $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_NAME -p $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_PASSWORD
+  #           docker pull sumzero/aws-cli-alpine
+  #           docker pull sumzero/thunderstorm:staging
+  #     - run:
+  #         name: 'Execute deployment to staging using terraform'
+  #         command: |
+  #           docker run -e RAILS_MASTER_KEY=$RAILS_MASTER_KEY -e AWS_DEFAULT_REGION=us-east-1 -e AWS_ACCESS_KEY_ID=$STAGING_AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY=$STAGING_AWS_SECRET_ACCESS_KEY -e SUMZERO_BASE_URL=$STAGING_SUMZERO_BASE_URL -e AWS_S3_OLD_AWS_ACCESS_KEY_ID=$AWS_S3_OLD_AWS_ACCESS_KEY_ID -e AWS_S3_OLD_AWS_SECRET_ACCESS_KEY=$AWS_S3_OLD_AWS_SECRET_ACCESS_KEY sumzero/thunderstorm:staging apply -target='module.SumZero.aws_ecs_service.main' -target='module.SumZero.module.task.aws_ecs_task_definition.main' -target='module.queues' -target='module.scheduled_tasks' -var "image_version=$CIRCLE_SHA1" -auto-approve -var-file="environments/staging/main.tfvars"
+
+  upload_prod_image_to_ecr:
+    working_directory: /app/sumzero
+    docker:
+      - image: docker:17.05.0-ce-git
+    steps:
+      - setup_remote_docker
+      - checkout
+      - run:
+          name: 'Pull image artifacts'
+          command: |
+            cd /app/sumzero
+            docker login -u $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_NAME -p $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_PASSWORD
+            docker pull sumzero/sumzero:$CIRCLE_SHA1
+            docker pull sumzero/aws-cli-alpine
+      - run:
+          name: 'Publish image to ECR'
+          command: |
+            cd /app/sumzero
+            eval "$(docker run -e AWS_DEFAULT_REGION=us-east-1 -e AWS_ACCESS_KEY_ID=$PROD_AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY=$PROD_AWS_SECRET_ACCESS_KEY sumzero/aws-cli-alpine aws ecr get-login --no-include-email | tr -d '\r\n')"
+            export REPOSITORYURI=`docker run -e AWS_DEFAULT_REGION=us-east-1 -e AWS_ACCESS_KEY_ID=$PROD_AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY=$PROD_AWS_SECRET_ACCESS_KEY sumzero/aws-cli-alpine /bin/sh -c "aws ecr describe-repositories --repository-names sumzero | jq .repositories[].repositoryUri" | tr -d \"`
+            docker tag sumzero/sumzero:$CIRCLE_SHA1 $REPOSITORYURI:$CIRCLE_SHA1
+
+            docker push $REPOSITORYURI:$CIRCLE_SHA1
+  prod_asset_build:
+    working_directory: /app/sumzero
+    docker:
+      - image: docker:17.05.0-ce-git
+    steps:
+      - setup_remote_docker
+      - run:
+          name: Load image from dockerhub (separated to show runtime)
+          command: |
+            set +o pipefail
+            docker login -u $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_NAME -p $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_PASSWORD
+            docker pull sumzero/aws-cli-alpine
+            docker pull sumzero/assets:$CIRCLE_SHA1
+      - run:
+          name: compile assets
+          no_output_timeout: 30m
+          command: |
+            set +o pipefail
+
+            mkdir -p /tmp/assets
+
+            docker run -e AWS_ACCESS_KEY_ID=$PROD_AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY=$PROD_AWS_SECRET_ACCESS_KEY -v /tmp/assets:/usr/src/app/public/assets/webpack sumzero/assets:$CIRCLE_SHA1 yarn run webpack-production-build --env.stripe_key_prod=$STRIPE_PUBLIC_KEY --env.gtm_auth=$GTM_AUTH --env.gtm_preview=$GTM_PREVIEW --env.rollbar_client_access_token=$ROLLBAR_CLIENT_ACCESS_TOKEN --env.rollbar_server_access_token=$ROLLBAR_SERVER_ACCESS_TOKEN --env.release_sha=$CIRCLE_SHA1
+
+      - run:
+          name: upload assets
+          command: |
+            set +o pipefail
+
+            docker run -e AWS_ACCESS_KEY_ID=$PROD_AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY=$PROD_AWS_SECRET_ACCESS_KEY -v /tmp/assets:/tmp/assets sumzero/aws-cli-alpine aws s3 sync /tmp/assets s3://sz-assets-prod/webpack/assets/$CIRCLE_SHA1 --grants read=uri=http://acs.amazonaws.com/groups/global/AllUsers
+  plan_deploy_prod:
+    working_directory: /app/sumzero
+    docker:
+      - image: docker:17.05.0-ce-git
+    steps:
+      - setup_remote_docker
+      - run:
+          name: 'Pull image artifacts'
+          command: |
+            docker login -u $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_NAME -p $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_PASSWORD
+            docker pull sumzero/aws-cli-alpine
+            docker pull sumzero/thunderstorm:prod
+      - run:
+          name: 'Plan deployment using terraform'
+          command: |
+            docker run  -e RAILS_MASTER_KEY=$RAILS_MASTER_KEY -e AWS_DEFAULT_REGION=us-east-1 -e AWS_ACCESS_KEY_ID=$PROD_AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY=$PROD_AWS_SECRET_ACCESS_KEY -e SUMZERO_BASE_URL=$SUMZERO_BASE_URL -e AWS_S3_OLD_AWS_ACCESS_KEY_ID=$AWS_S3_OLD_AWS_ACCESS_KEY_ID -e AWS_S3_OLD_AWS_SECRET_ACCESS_KEY=$AWS_S3_OLD_AWS_SECRET_ACCESS_KEY sumzero/thunderstorm:prod plan -target='module.SumZero.aws_ecs_service.main' -target='module.SumZero.module.task.aws_ecs_task_definition.main' -target='module.queues' -target='module.scheduled_tasks' -var "image_version=$CIRCLE_SHA1" -var-file="environments/prod/main.tfvars"
+  deploy_prod:
+    working_directory: /app/sumzero
+    docker:
+      - image: docker:17.05.0-ce-git
+    steps:
+      - setup_remote_docker
+      - run:
+          name: 'Pull image artifacts'
+          command: |
+            docker login -u $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_NAME -p $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_PASSWORD
+            docker pull sumzero/aws-cli-alpine
+            docker pull sumzero/thunderstorm:prod
+      - run:
+          name: 'Execute deployment using terraform'
+          command: |
+            docker run  -e RAILS_MASTER_KEY=$RAILS_MASTER_KEY -e AWS_DEFAULT_REGION=us-east-1 -e AWS_ACCESS_KEY_ID=$PROD_AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY=$PROD_AWS_SECRET_ACCESS_KEY -e SUMZERO_BASE_URL=$SUMZERO_BASE_URL -e AWS_S3_OLD_AWS_ACCESS_KEY_ID=$AWS_S3_OLD_AWS_ACCESS_KEY_ID -e AWS_S3_OLD_AWS_SECRET_ACCESS_KEY=$AWS_S3_OLD_AWS_SECRET_ACCESS_KEY sumzero/thunderstorm:prod apply -target='module.SumZero.aws_ecs_service.main' -target='module.SumZero.module.task.aws_ecs_task_definition.main' -target='module.queues' -target='module.scheduled_tasks' -var "image_version=$CIRCLE_SHA1" -auto-approve -var-file="environments/prod/main.tfvars"
+
+  run-eslint:
+    working_directory: /app/sumzero
+    docker:
+      - image: docker:17.05.0-ce-git
+    steps:
+      - setup_remote_docker
+      - run:
+          name: Load image from dockerhub (separated to show runtime)
+          command: |
+            set +o pipefail
+            docker login -u $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_NAME -p $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_PASSWORD
+            docker pull sumzero/assets:$CIRCLE_SHA1
+      - run:
+          name: Run ESLint
+          command: |
+            set +o pipefail
+            docker run sumzero/assets:$CIRCLE_SHA1 yarn lint
+  run-typescript:
+    working_directory: /app/sumzero
+    docker:
+      - image: docker:17.05.0-ce-git
+    steps:
+      - setup_remote_docker
+      - run:
+          name: Load image from dockerhub (separated to show runtime)
+          command: |
+            set +o pipefail
+            docker login -u $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_NAME -p $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_PASSWORD
+            docker pull sumzero/assets:$CIRCLE_SHA1
+      - run:
+          name: Run Typescript checker
+          command: |
+            set +o pipefail
+            docker run sumzero/assets:$CIRCLE_SHA1 yarn check-types
+  run-rubocop:
+    working_directory: /app/sumzero
+    docker:
+      - image: docker:17.05.0-ce-git
+    steps:
+      - setup_remote_docker
+      - run:
+          name: Load image from dockerhub (separated to show runtime)
+          command: |
+            set +o pipefail
+            docker login -u $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_NAME -p $DOCKER_HUB_CIRCLE_DEPLOY_ACCOUNT_PASSWORD
+            docker pull sumzero/sumzero:$CIRCLE_SHA1-test
+      - run:
+          name: Run Rubocop
+          command: |
+            set +o pipefail
+            docker run sumzero/sumzero:$CIRCLE_SHA1-test bundle exec rubocop
 workflows:
-  build-workflow:
+  pr:
     jobs:
-      - build
+      - checkout_code
+      # BUILD STEPS
+      - bundle_ruby:
+          requires:
+            - checkout_code
+      - package_node:
+          requires:
+            - checkout_code
+      # TESTS
+      - run_rspec:
+          requires:
+            - bundle_ruby
+      - run_jest:
+          requires:
+            - package_node
+      - run_capybara_specs:
+          requires:
+            - package_node
+      # LINTING
+      - run_rubocop:
+          requires:
+            - bundle_ruby
+      - run_typescript:
+          requires:
+            - package_node
+      - run_eslint:
+          requires:
+            - package_node
+
+  hotfix-deploy:
+    jobs:
+      - sumzero-image-build:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^hotfix.*/
+      - asset-image-build:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^hotfix.*/
+      - prod_asset_build:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^hotfix.*/
+          requires:
+            - asset-image-build
+      - upload_prod_image_to_ecr:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^hotfix.*/
+          requires:
+            - sumzero-image-build
+      - plan_deploy_prod:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^hotfix.*/
+          requires:
+            - prod_asset_build
+            - upload_prod_image_to_ecr
+      - hold_for_deploy_prod_review:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^hotfix.*/
+          type: approval
+          requires:
+            - plan_deploy_prod
+      - deploy_prod:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^hotfix.*/
+          requires:
+            - hold_for_deploy_prod_review
+
+  build-deploy:
+    jobs:
+      - start_build:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+              ignore: /^hotfix.*/
+      - sumzero-image-build:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+          requires:
+            - start_build
+      - asset-image-build:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+          requires:
+            - start_build
+      - run-eslint:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+          requires:
+            - asset-image-build
+      - run-typescript:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+          requires:
+            - asset-image-build
+      - run-rubocop:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+          requires:
+            - sumzero-image-build
+      - js-assets-build:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+          requires:
+            - asset-image-build
+      - js-tests:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+          requires:
+            - run-typescript
+            - run-eslint
+            - run-rubocop
+      - ruby-specs:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+          requires:
+            - js-assets-build
+            - run-rubocop
+            - run-eslint
+            - run-typescript
+      - capybara-specs:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+          requires:
+            - js-assets-build
+            - run-rubocop
+            - run-eslint
+            - run-typescript
+      - upload_prod_image_to_ecr:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+          requires:
+            - capybara-specs
+      - prod_asset_build:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+          requires:
+            - capybara-specs
+      - plan_deploy_prod:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+          requires:
+            - prod_asset_build
+            - upload_prod_image_to_ecr
+      - hold_for_deploy_prod_review:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+          type: approval
+          requires:
+            - plan_deploy_prod
+      - deploy_prod:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+          requires:
+            - hold_for_deploy_prod_review
+      # staging deploy, built alongside prod deploy
+      # - upload_staging_image_to_ecr:
+      #     filters:
+      #       branches:
+      #         ignore: /.*/
+      #       tags:
+      #         only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+      #     requires:
+      #       - capybara-specs
+      # - staging_asset_build:
+      #     filters:
+      #       branches:
+      #         ignore: /.*/
+      #       tags:
+      #         only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+      #     requires:
+      #       - capybara-specs
+      # - plan_deploy_staging:
+      #     filters:
+      #       branches:
+      #         ignore: /.*/
+      #       tags:
+      #         only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+      #     requires:
+      #       - staging_asset_build
+      #       - upload_staging_image_to_ecr
+      # - hold_for_deploy_staging_review:
+      #     filters:
+      #       branches:
+      #         ignore: /.*/
+      #       tags:
+      #         only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+      #     type: approval
+      #     requires:
+      #       - plan_deploy_staging
+      # - deploy_staging:
+      #     filters:
+      #       branches:
+      #         ignore: /.*/
+      #       tags:
+      #         only: /^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}.*/
+      #     requires:
+      #       - hold_for_deploy_staging_review
